@@ -25,10 +25,10 @@ RUN curl -o- https://raw.githubusercontent.com/devcontainers/features/main/src/n
 # Install solc-select
 RUN pipx install solc-select
 
-# Foundry at specific version
+# Foundry
 RUN curl -L https://foundry.paradigm.xyz | zsh
 
-RUN foundryup --version nightly-2044faec64f99a21f0e5f0094458a973612d0712
+RUN foundryup
 
 # Clean up
 RUN sudo apt-get autoremove -y && sudo apt-get clean -y

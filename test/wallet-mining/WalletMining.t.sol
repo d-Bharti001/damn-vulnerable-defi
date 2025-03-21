@@ -5,12 +5,25 @@ pragma solidity =0.8.25;
 import {Test, console} from "forge-std/Test.sol";
 import {SafeProxyFactory} from "@safe-global/safe-smart-account/contracts/proxies/SafeProxyFactory.sol";
 import {Safe, OwnerManager, Enum} from "@safe-global/safe-smart-account/contracts/Safe.sol";
-import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+import {SafeProxy} from "@safe-global/safe-smart-account/contracts/proxies/SafeProxy.sol";
 import {DamnValuableToken} from "../../src/DamnValuableToken.sol";
 import {WalletDeployer} from "../../src/wallet-mining/WalletDeployer.sol";
 import {
     AuthorizerFactory, AuthorizerUpgradeable, TransparentProxy
 } from "../../src/wallet-mining/AuthorizerFactory.sol";
+import {
+    ICreateX,
+    CREATEX_DEPLOYMENT_SIGNER,
+    CREATEX_ADDRESS,
+    CREATEX_DEPLOYMENT_TX,
+    CREATEX_CODEHASH
+} from "./CreateX.sol";
+import {
+    SAFE_SINGLETON_FACTORY_DEPLOYMENT_SIGNER,
+    SAFE_SINGLETON_FACTORY_DEPLOYMENT_TX,
+    SAFE_SINGLETON_FACTORY_ADDRESS,
+    SAFE_SINGLETON_FACTORY_CODE
+} from "./SafeSingletonFactory.sol";
 
 contract WalletMiningChallenge is Test {
     address deployer = makeAddr("deployer");
@@ -20,12 +33,8 @@ contract WalletMiningChallenge is Test {
     address user;
     uint256 userPrivateKey;
 
-    address constant USER_DEPOSIT_ADDRESS = 0x8be6a88D3871f793aD5D5e24eF39e1bf5be31d2b;
+    address constant USER_DEPOSIT_ADDRESS = 0xCe07CF30B540Bb84ceC5dA5547e1cb4722F9E496;
     uint256 constant DEPOSIT_TOKEN_AMOUNT = 20_000_000e18;
-
-    address constant SAFE_SINGLETON_FACTORY_ADDRESS = 0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7;
-    bytes constant SAFE_SINGLETON_FACTORY_CODE =
-        hex"7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3";
 
     DamnValuableToken token;
     AuthorizerUpgradeable authorizer;
@@ -49,6 +58,20 @@ contract WalletMiningChallenge is Test {
         // Player should be able to use the user's private key
         (user, userPrivateKey) = makeAddrAndKey("user");
 
+        // Deploy Safe Singleton Factory contract using signed transaction
+        vm.deal(SAFE_SINGLETON_FACTORY_DEPLOYMENT_SIGNER, 10 ether);
+        vm.broadcastRawTransaction(SAFE_SINGLETON_FACTORY_DEPLOYMENT_TX);
+        assertEq(
+            SAFE_SINGLETON_FACTORY_ADDRESS.codehash,
+            keccak256(SAFE_SINGLETON_FACTORY_CODE),
+            "Unexpected Safe Singleton Factory code"
+        );
+
+        // Deploy CreateX contract using signed transaction
+        vm.deal(CREATEX_DEPLOYMENT_SIGNER, 10 ether);
+        vm.broadcastRawTransaction(CREATEX_DEPLOYMENT_TX);
+        assertEq(CREATEX_ADDRESS.codehash, CREATEX_CODEHASH, "Unexpected CreateX code");
+
         startHoax(deployer);
 
         // Deploy token
@@ -59,14 +82,17 @@ contract WalletMiningChallenge is Test {
         wards[0] = ward;
         address[] memory aims = new address[](1);
         aims[0] = USER_DEPOSIT_ADDRESS;
-        AuthorizerFactory authorizerFactory = new AuthorizerFactory();
+
+        AuthorizerFactory authorizerFactory = AuthorizerFactory(
+            ICreateX(CREATEX_ADDRESS).deployCreate2({
+                salt: bytes32(keccak256("dvd.walletmining.authorizerfactory")),
+                initCode: type(AuthorizerFactory).creationCode
+            })
+        );
         authorizer = AuthorizerUpgradeable(authorizerFactory.deployWithProxy(wards, aims, upgrader));
 
         // Send big bag full of DVT tokens to the deposit address
         token.transfer(USER_DEPOSIT_ADDRESS, DEPOSIT_TOKEN_AMOUNT);
-
-        // Include Safe singleton factory in this chain
-        vm.etch(SAFE_SINGLETON_FACTORY_ADDRESS, SAFE_SINGLETON_FACTORY_CODE);
 
         // Call singleton factory to deploy copy and factory contracts
         (bool success, bytes memory returndata) =
@@ -78,12 +104,20 @@ contract WalletMiningChallenge is Test {
         proxyFactory = SafeProxyFactory(address(uint160(bytes20(returndata))));
 
         // Deploy wallet deployer
-        walletDeployer = new WalletDeployer(address(token), address(proxyFactory), address(singletonCopy));
+        walletDeployer = WalletDeployer(
+            ICreateX(CREATEX_ADDRESS).deployCreate2({
+                salt: bytes32(keccak256("dvd.walletmining.walletdeployer")),
+                initCode: bytes.concat(
+                    type(WalletDeployer).creationCode,
+                    abi.encode(address(token), address(proxyFactory), address(singletonCopy), deployer) // constructor args are appended at the end of creation code
+                )
+            })
+        );
 
         // Set authorizer in wallet deployer
         walletDeployer.rule(address(authorizer));
 
-        // Fund wallet deployer with tokens
+        // Fund wallet deployer with initial tokens
         initialWalletDeployerTokenBalance = walletDeployer.pay();
         token.transfer(address(walletDeployer), initialWalletDeployerTokenBalance);
 

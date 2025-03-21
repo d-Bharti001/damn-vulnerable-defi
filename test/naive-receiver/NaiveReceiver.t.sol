@@ -63,7 +63,7 @@ contract NaiveReceiverChallenge is Test {
         assertEq(pool.feeReceiver(), deployer);
 
         // Cannot call receiver
-        vm.expectRevert(0x48f5c3ed);
+        vm.expectRevert(bytes4(hex"48f5c3ed"));
         receiver.onFlashLoan(
             deployer,
             address(weth), // token

@@ -16,7 +16,7 @@ contract WalletDeployer {
     address public immutable cpy;
 
     uint256 public constant pay = 1 ether;
-    address public immutable chief = msg.sender;
+    address public immutable chief;
     address public immutable gem;
 
     address public mom;
@@ -24,10 +24,11 @@ contract WalletDeployer {
 
     error Boom();
 
-    constructor(address _gem, address _cook, address _cpy) {
+    constructor(address _gem, address _cook, address _cpy, address _chief) {
         gem = _gem;
         cook = SafeProxyFactory(_cook);
         cpy = _cpy;
+        chief = _chief;
     }
 
     /**
